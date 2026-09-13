@@ -57,7 +57,7 @@ if [ -n "${SSH_TUNNEL_KEY:-}" ]; then
     if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
       echo "  [${i}] ssh tunnel process died - last log lines:"; tail -20 /tmp/sshtun.log; break
     fi
-    code=$(curl -s -o /dev/null -m 6 -w "%{http_code}" "https://${EDIT_HOST}/__diag" 2>/dev/null || echo "FAIL")
+    code=$(curl -s -o /dev/null -m 6 -w "%{http_code}" "https://${EDIT_HOST}/__diag.php" 2>/dev/null || echo "FAIL")
     if [ "$code" = "200" ]; then
       connected=1; echo "  [${i}] connected (public probe -> 200)"; break
     fi
@@ -67,7 +67,7 @@ if [ -n "${SSH_TUNNEL_KEY:-}" ]; then
     echo "ssh tunnel connected; live at https://${EDIT_HOST}/"
     echo "self-test: 3 more round trips out through the VPS and back:"
     for i in 1 2 3; do
-      curl -s -o /dev/null -m 15 -w "  [self-test $i] https://${EDIT_HOST}/__diag -> %{http_code} (%{time_total}s)\n" "https://${EDIT_HOST}/__diag" || echo "  [self-test $i] curl failed (exit $?)"
+      curl -s -o /dev/null -m 15 -w "  [self-test $i] https://${EDIT_HOST}/__diag.php -> %{http_code} (%{time_total}s)\n" "https://${EDIT_HOST}/__diag.php" || echo "  [self-test $i] curl failed (exit $?)"
       sleep 3
     done
   else
@@ -103,7 +103,7 @@ while true; do
   fi
   if [ $(( now - last_diag )) -ge $DIAG_EVERY ]; then
     if kill -0 "$PHPFPM_PID" 2>/dev/null; then lc="alive"; else lc="DEAD"; fi
-    tc=$(curl -s -o /dev/null -m 8 -w "%{http_code}" "https://${EDIT_HOST}/__diag" 2>/dev/null || echo "FAIL")
+    tc=$(curl -s -o /dev/null -m 8 -w "%{http_code}" "https://${EDIT_HOST}/__diag.php" 2>/dev/null || echo "FAIL")
     echo "  [diag $(date -u +%H:%M:%S)] php-fpm=$lc  tunnel(${EDIT_HOST})=$tc"
     last_diag=$now
   fi
