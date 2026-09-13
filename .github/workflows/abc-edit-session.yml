@@ -1,0 +1,57 @@
+name: ABC checkout session
+
+# The XOOPS shop's checkout/cart/payment flow runs only for the length of a
+# customer's visit, restored from R2 into a runner (PHP 5.6 + MySQL), reached
+# through a Cloudflare tunnel. The public catalog is a separate static site on
+# Pages - this repo exists ONLY for the parts that can't be static: cart,
+# checkout, and the NewebPay payment callback.
+
+on:
+  workflow_dispatch:
+    inputs:
+      idle_minutes:
+        default: "10"
+      checkout_hold_minutes:
+        default: "40"
+
+concurrency:
+  group: abc-checkout-session
+  cancel-in-progress: false
+
+jobs:
+  session:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 350
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -proot" --health-interval=5s
+          --health-timeout=5s --health-retries=20
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      STATE_BUCKET: ${{ secrets.STATE_BUCKET }}
+      EDIT_HOST: ${{ secrets.EDIT_HOST }}
+      DB_DATABASE: ${{ secrets.DB_DATABASE }}
+      TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
+      IDLE_MINUTES: ${{ inputs.idle_minutes }}
+      CHECKOUT_HOLD_MINUTES: ${{ inputs.checkout_hold_minutes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '5.6'
+          extensions: mysql, gd, curl, zip, mbstring, mcrypt, session, xml, simplexml, iconv, zlib, ctype, dom, gettext, json
+          tools: none
+      - name: Boot
+        run: bash tools/abc-boot.sh
+      - name: Session
+        run: bash tools/abc-session.sh
+      - name: Final persist
+        if: always()
+        run: bash tools/abc-persist.sh
