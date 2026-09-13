@@ -12,8 +12,13 @@ mysqldump -h127.0.0.1 -uroot -proot "${DB_DATABASE}" 2>/dev/null | gzip > /tmp/d
 put /tmp/db.sql.gz application/gzip "$CF/db-latest.sql.gz" && echo "  [persist $(date -u +%H:%M:%S)] saved db-latest.sql.gz ($(du -h /tmp/db.sql.gz|cut -f1))"
 put /tmp/db.sql.gz application/gzip "$CF/history/db-$(date +%Y%m%d-%H%M%S).sql.gz" || true
 
+# mainfile.php IS included - abc-boot.sh rewrites every environment-specific
+# constant (URL/DB host/user/pass) on every boot regardless of what's already
+# in the file, so persisting it is harmless. Excluding it here previously (with
+# set -uo pipefail, not -e) let a failed/missing-file rewrite pass silently,
+# permanently corrupting the saved state - a real incident, see memory.
 tar czf /tmp/app.tar.gz --warning=no-file-changed --ignore-failed-read \
-    --exclude='./mainfile.php' --exclude='./templates_c/*' \
+    --exclude='./templates_c/*' \
     --exclude='./xoops_data/caches/*' --exclude='./class/cache/*' \
     . 2>/dev/null || true
 put /tmp/app.tar.gz application/gzip "$CF/app.tar.gz" && echo "  [persist $(date -u +%H:%M:%S)] saved app.tar.gz ($(du -h /tmp/app.tar.gz|cut -f1))"

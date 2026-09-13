@@ -16,7 +16,7 @@ set -uo pipefail
 cd "${GITHUB_WORKSPACE:-$PWD}/webroot"
 
 php -d error_reporting="E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_STRICT" \
-    -d display_errors=1 -S 127.0.0.1:8080 router.php >/tmp/php.log 2>&1 &
+    -d display_errors=0 -S 127.0.0.1:8080 router.php >/tmp/php.log 2>&1 &
 sleep 3
 echo "php -S started; local probe:"
 curl -s -o /dev/null -w "  / -> %{http_code}\n" "http://127.0.0.1:8080/" || true

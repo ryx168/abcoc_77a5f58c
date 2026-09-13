@@ -44,6 +44,11 @@ h = re.sub(r"define\(\s*'XOOPS_DB_NAME',\s*'[^']*'\s*\);", "define( 'XOOPS_DB_NA
 io.open(p, "w", encoding="utf-8", newline="\n").write(h)
 print("  mainfile.php rewritten for", eh)
 PY
+REWRITE_STATUS=$?
+if [ $REWRITE_STATUS -ne 0 ]; then
+  echo "  FATAL: mainfile.php rewrite failed (exit $REWRITE_STATUS) - refusing to continue with a broken/missing config"
+  exit 1
+fi
 echo "::endgroup::"
 
 # Router for php -S: serve real static files directly; force HTTPS since the
