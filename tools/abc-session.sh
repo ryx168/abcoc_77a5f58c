@@ -26,6 +26,11 @@ set -uo pipefail
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${GITHUB_WORKSPACE:-$PWD}/webroot"
 
+echo "TEMP DIAG: checking for php-fpm availability"
+which php-fpm php-fpm5.6 php-fpm56 2>&1 || true
+ls -la /usr/sbin/php-fpm* /usr/bin/php-fpm* 2>&1 || true
+php -v
+
 php -d error_reporting="E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_STRICT" \
     -d display_errors=0 -S 127.0.0.1:8080 router.php >/tmp/php.log 2>&1 &
 sleep 3
