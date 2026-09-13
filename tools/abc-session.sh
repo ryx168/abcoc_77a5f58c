@@ -13,6 +13,7 @@
 # not just extended by the normal idle window - covering the external round trip
 # even if nothing else touches us until the callback arrives.
 set -uo pipefail
+TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${GITHUB_WORKSPACE:-$PWD}/webroot"
 
 php -d error_reporting="E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_STRICT" \
@@ -25,7 +26,25 @@ if [ -n "${TUNNEL_TOKEN:-}" ]; then
   curl -fsSL -o /tmp/cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
   chmod +x /tmp/cloudflared
   /tmp/cloudflared tunnel --no-autoupdate --loglevel info run --token "$TUNNEL_TOKEN" >/tmp/cfd.log 2>&1 &
-  echo "cloudflared started; live at https://${EDIT_HOST}/"
+  echo "cloudflared launched (pid $!); verifying it actually registers a connection:"
+  registered=0
+  for i in $(seq 1 12); do
+    sleep 5
+    if grep -qi "Registered tunnel connection\|Connection .*registered" /tmp/cfd.log 2>/dev/null; then
+      registered=1; echo "  [${i}] connected"; break
+    fi
+    if ! kill -0 $! 2>/dev/null; then
+      echo "  [${i}] cloudflared process died - last log lines:"; tail -20 /tmp/cfd.log; break
+    fi
+    echo "  [${i}] not yet connected"
+    tail -3 /tmp/cfd.log 2>/dev/null | sed 's/^/    /'
+  done
+  if [ "$registered" = "1" ]; then
+    echo "cloudflared connected; live at https://${EDIT_HOST}/"
+  else
+    echo "WARNING: cloudflared did not confirm a registered connection within 60s - dumping full log:"
+    cat /tmp/cfd.log 2>/dev/null
+  fi
 else
   echo "no TUNNEL_TOKEN - local only"
 fi
@@ -56,7 +75,7 @@ while true; do
     fi
   fi
   if [ $(( now - last_persist )) -ge $PERSIST_EVERY ]; then
-    bash "$(dirname "$0")/abc-persist.sh" || echo "  periodic persist failed (will retry next cycle)"
+    bash "$TOOLS_DIR/abc-persist.sh" || echo "  periodic persist failed (will retry next cycle)"
     last_persist=$now
   fi
   idle=$(( now - last_active ))
