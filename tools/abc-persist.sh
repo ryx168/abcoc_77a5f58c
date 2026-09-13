@@ -24,7 +24,11 @@ tar czf /tmp/app.tar.gz --warning=no-file-changed --ignore-failed-read \
 # Guard against ever uploading a broken/truncated tarball over the last-known-good
 # R2 copy - this exact failure mode (tar producing a near-empty file, silently
 # accepted because this script itself has no -e) corrupted app.tar.gz once already.
-if tar tzf /tmp/app.tar.gz >/dev/null 2>&1 && tar tzf /tmp/app.tar.gz | grep -q '^\./mainfile\.php$'; then
+# (Read the listing into a variable rather than piping to grep -q directly - with
+# set -o pipefail, grep -q's early exit on the first match SIGPIPEs tar, which
+# then reports nonzero and fails the check even for a perfectly good archive.)
+TAR_LISTING="$(tar tzf /tmp/app.tar.gz 2>/dev/null)" || TAR_LISTING=""
+if [ -n "$TAR_LISTING" ] && grep -qx './mainfile.php' <<<"$TAR_LISTING"; then
   put /tmp/app.tar.gz application/gzip "$CF/app.tar.gz" && echo "  [persist $(date -u +%H:%M:%S)] saved app.tar.gz ($(du -h /tmp/app.tar.gz|cut -f1))"
 else
   echo "  [persist $(date -u +%H:%M:%S)] REFUSING to upload app.tar.gz - failed integrity check (size $(wc -c < /tmp/app.tar.gz 2>/dev/null || echo '?')), leaving last-known-good R2 copy untouched"

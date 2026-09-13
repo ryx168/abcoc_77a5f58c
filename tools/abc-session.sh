@@ -48,6 +48,13 @@ if [ -n "${TUNNEL_TOKEN:-}" ]; then
   done
   if [ "$registered" = "1" ]; then
     echo "cloudflared connected; live at https://${EDIT_HOST}/"
+    echo "proxy env vars (a runner-set proxy can silently break cloudflared's own edge connections):"
+    env | grep -i proxy || echo "  (none set)"
+    echo "self-test: round-trip out through cloudflared and back through the SAME tunnel, from this same machine:"
+    for i in 1 2 3; do
+      curl -s -o /dev/null -m 15 -w "  [self-test $i] https://${EDIT_HOST}/ -> %{http_code} (%{time_total}s)\n" "https://${EDIT_HOST}/" || echo "  [self-test $i] curl failed (exit $?)"
+      sleep 3
+    done
   else
     echo "WARNING: cloudflared did not confirm a registered connection within 60s - dumping full log:"
     cat /tmp/cfd.log 2>/dev/null
