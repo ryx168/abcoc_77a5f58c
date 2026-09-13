@@ -62,6 +62,12 @@ cat > router.php <<'PHP'
 $_SERVER['HTTPS'] = 'on';
 $_SERVER['SERVER_PORT'] = 443;
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+if ($path === '/__phplog') {
+    header('Content-Type: text/plain');
+    $f = '/tmp/php.log';
+    echo is_file($f) ? @file_get_contents($f) : 'no log file';
+    return true;
+}
 if ($path === '/' || $path === '') {
     chdir(__DIR__);
     require __DIR__ . '/index.php';
