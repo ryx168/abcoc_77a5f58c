@@ -51,17 +51,22 @@ echo "::endgroup::"
 # logic can loop the same way OpenCart's admin did).
 cat > router.php <<'PHP'
 <?php
+// XOOPS hits real .php files directly (modules/shop/goods.php?id=X, cart.php,
+// etc.) - no query-string routing scheme like OpenCart's. So the router only
+// needs to (a) force HTTPS since the tunnel terminates TLS, and (b) map "/" to
+// index.php. Every other existing file - .php included - is left to php -S's
+// OWN native execution, which sets up the full standard SAPI environment
+// (SCRIPT_FILENAME, PATH_TRANSLATED, etc.) that XOOPS' module/path detection
+// depends on. A custom require() here was setting only SCRIPT_NAME and left
+// $GLOBALS['xoopsModule'] never populated - "No Module is loaded".
 $_SERVER['HTTPS'] = 'on';
 $_SERVER['SERVER_PORT'] = 443;
 $path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-$file = __DIR__ . $path;
-if ($path !== '/' && is_file($file) && substr($path, -4) !== '.php') { return false; }
-chdir(__DIR__);
-if ($path === '/' || $path === '') { $_SERVER['SCRIPT_NAME'] = '/index.php'; require __DIR__ . '/index.php'; return true; }
-$script = __DIR__ . $path;
-if (is_file($script) && substr($script, -4) === '.php') { $_SERVER['SCRIPT_NAME'] = $path; require $script; return true; }
-http_response_code(404);
-echo 'Not found';
-return true;
+if ($path === '/' || $path === '') {
+    chdir(__DIR__);
+    require __DIR__ . '/index.php';
+    return true;
+}
+return false;   // let php -S serve/execute the real file natively
 PHP
 echo "BOOT_OK ROOT=$ROOT"
