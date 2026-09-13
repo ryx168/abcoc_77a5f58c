@@ -19,6 +19,15 @@ fi
 rm -f app.tar.gz
 curl -sSf -H "Authorization: Bearer ${CF_API_TOKEN}" "$CF/db-latest.sql.gz" -o db.sql.gz
 echo "  app + db restored; top: $(ls | tr '\n' ' ')"
+# abc-persist.sh excludes these as *contents* (they're regenerated at runtime and
+# stale absolute-path caches were the whole reason they get wiped), but tar's
+# --exclude on a glob like './xoops_data/caches/*' also drops the empty
+# subdirectory ENTRIES themselves (smarty_compile, smarty_cache, xoops_cache) -
+# so a persisted archive permanently loses them, and Smarty then fatals on
+# every page with "compile_dir does not exist". Recreate them unconditionally.
+mkdir -p xoops_data/caches/smarty_compile xoops_data/caches/smarty_cache xoops_data/caches/xoops_cache
+mkdir -p templates_c class/cache modules/shop/cache modules/news/cache
+echo "  ensured cache directories exist"
 echo "::endgroup::"
 
 echo "::group::Database"
