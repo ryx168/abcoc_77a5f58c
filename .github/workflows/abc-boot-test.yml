@@ -55,13 +55,7 @@ jobs:
           curl -s -o /tmp/cart.html -w "cart-add HTTP %{http_code}\n" -X POST "http://127.0.0.1:8080/modules/shop/cart.php" --data "item_id=1&goods_id=37&op=add"
           cat /tmp/cart.html
           echo "=== SERVER vars XOOPS sees (temp probe) ==="
-          cat > /tmp/probe.php <<'EOF'
-<?php echo "SCRIPT_NAME=".($_SERVER['SCRIPT_NAME']??'?')."\n";
-echo "SCRIPT_FILENAME=".($_SERVER['SCRIPT_FILENAME']??'?')."\n";
-echo "PHP_SELF=".($_SERVER['PHP_SELF']??'?')."\n";
-echo "REQUEST_URI=".($_SERVER['REQUEST_URI']??'?')."\n";
-EOF
-          cp /tmp/probe.php modules/shop/probe.php
+          printf '%s' '<?php function g($k){return isset($_SERVER[$k])?$_SERVER[$k]:"?";} echo "SCRIPT_NAME=".g("SCRIPT_NAME")."\n"; echo "SCRIPT_FILENAME=".g("SCRIPT_FILENAME")."\n"; echo "PHP_SELF=".g("PHP_SELF")."\n"; echo "REQUEST_URI=".g("REQUEST_URI")."\n";' > modules/shop/probe.php
           curl -s "http://127.0.0.1:8080/modules/shop/probe.php"
           echo ""
           echo "=== php error log (tail) ==="
