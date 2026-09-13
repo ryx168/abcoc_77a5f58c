@@ -10,7 +10,13 @@ CF="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${
 
 echo "::group::Restore state from R2"
 curl -sSf -H "Authorization: Bearer ${CF_API_TOKEN}" "$CF/app.tar.gz" -o app.tar.gz
-tar xzf app.tar.gz && rm -f app.tar.gz
+tar xzf app.tar.gz
+TAR_STATUS=$?
+if [ $TAR_STATUS -ne 0 ] || [ ! -f mainfile.php ]; then
+  echo "  FATAL: app.tar.gz extraction failed or mainfile.php missing afterward (tar exit $TAR_STATUS, size $(wc -c < app.tar.gz 2>/dev/null || echo '?')) - refusing to boot from corrupt state"
+  exit 1
+fi
+rm -f app.tar.gz
 curl -sSf -H "Authorization: Bearer ${CF_API_TOKEN}" "$CF/db-latest.sql.gz" -o db.sql.gz
 echo "  app + db restored; top: $(ls | tr '\n' ' ')"
 echo "::endgroup::"
