@@ -1,5 +1,15 @@
 #!/bin/bash
-# Run the XOOPS shop behind the Cloudflare tunnel until it goes idle.
+# Run the XOOPS shop behind an SSH reverse tunnel until it goes idle.
+#
+# Cloudflare Tunnel was replaced here after it proved unreliable at the data-plane
+# level from this repo's GH Actions runners (control connection registered
+# "healthy" while actual requests silently hung, on and off, for hours - see git
+# history). This SSH reverse tunnel targets our own VPS (64.188.31.56, already
+# proven reliable serving live mail) instead of a third-party tunnel network:
+# `ssh -R` binds a port on the VPS's loopback that only its own nginx can reach,
+# nginx proxies the public hostname to that port. The tunnel key is restricted
+# (no shell, no forward-outbound, permitlisten pinned to that one port) so a
+# leaked GH secret can only ever re-establish this exact reverse listener.
 #
 # Idle is measured by requests to checkout-relevant routes (cart/checkout/goods/
 # the NewebPay callback endpoints) - not admin/browsing noise, since this repo
@@ -22,45 +32,46 @@ sleep 3
 echo "php -S started; local probe:"
 curl -s -o /dev/null -w "  / -> %{http_code}\n" "http://127.0.0.1:8080/" || true
 
-if [ -n "${TUNNEL_TOKEN:-}" ]; then
-  curl -fsSL -o /tmp/cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
-  chmod +x /tmp/cloudflared
-  # --protocol http2: GH Actions runners' network handles the default QUIC/UDP
-  # transport strangely - the tunnel registers as a healthy connection (control
-  # plane over QUIC works) but request data never actually flows through it
-  # (every proxied request hangs with zero bytes, even though the same origin
-  # answers instantly on localhost and other tunnels on this same zone/account
-  # respond normally). Forcing TCP-based HTTP/2 avoids the UDP data plane
-  # entirely and is the standard fix for this exact "healthy but silent" symptom.
-  /tmp/cloudflared tunnel --no-autoupdate --protocol http2 --loglevel info run --token "$TUNNEL_TOKEN" >/tmp/cfd.log 2>&1 &
-  echo "cloudflared launched (pid $!); verifying it actually registers a connection:"
-  registered=0
+SSH_KEY_FILE="/tmp/abc_ssh_tunnel_key"
+TUNNEL_PID=""
+start_tunnel() {
+  ssh -N -o StrictHostKeyChecking=no -o BatchMode=yes -o ServerAliveInterval=15 \
+      -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o ConnectTimeout=10 \
+      -i "$SSH_KEY_FILE" \
+      -R "127.0.0.1:${SSH_TUNNEL_REMOTE_PORT}:127.0.0.1:8080" \
+      "${SSH_TUNNEL_USER}@${SSH_TUNNEL_HOST}" >>/tmp/sshtun.log 2>&1 &
+  TUNNEL_PID=$!
+}
+
+if [ -n "${SSH_TUNNEL_KEY:-}" ]; then
+  ( umask 077; printf '%s\n' "$SSH_TUNNEL_KEY" > "$SSH_KEY_FILE" )
+  start_tunnel
+  echo "ssh reverse tunnel launched (pid $TUNNEL_PID); verifying end-to-end through the public hostname:"
+  connected=0
   for i in $(seq 1 12); do
     sleep 5
-    if grep -qi "Registered tunnel connection\|Connection .*registered" /tmp/cfd.log 2>/dev/null; then
-      registered=1; echo "  [${i}] connected"; break
+    if ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+      echo "  [${i}] ssh tunnel process died - last log lines:"; tail -20 /tmp/sshtun.log; break
     fi
-    if ! kill -0 $! 2>/dev/null; then
-      echo "  [${i}] cloudflared process died - last log lines:"; tail -20 /tmp/cfd.log; break
+    code=$(curl -s -o /dev/null -m 6 -w "%{http_code}" "https://${EDIT_HOST}/__diag" 2>/dev/null || echo "FAIL")
+    if [ "$code" = "200" ]; then
+      connected=1; echo "  [${i}] connected (public probe -> 200)"; break
     fi
-    echo "  [${i}] not yet connected"
-    tail -3 /tmp/cfd.log 2>/dev/null | sed 's/^/    /'
+    echo "  [${i}] not yet confirmed (public probe -> $code)"
   done
-  if [ "$registered" = "1" ]; then
-    echo "cloudflared connected; live at https://${EDIT_HOST}/"
-    echo "proxy env vars (a runner-set proxy can silently break cloudflared's own edge connections):"
-    env | grep -i proxy || echo "  (none set)"
-    echo "self-test: round-trip out through cloudflared and back through the SAME tunnel, from this same machine:"
+  if [ "$connected" = "1" ]; then
+    echo "ssh tunnel connected; live at https://${EDIT_HOST}/"
+    echo "self-test: 3 more round trips out through the VPS and back:"
     for i in 1 2 3; do
-      curl -s -o /dev/null -m 15 -w "  [self-test $i] https://${EDIT_HOST}/ -> %{http_code} (%{time_total}s)\n" "https://${EDIT_HOST}/" || echo "  [self-test $i] curl failed (exit $?)"
+      curl -s -o /dev/null -m 15 -w "  [self-test $i] https://${EDIT_HOST}/__diag -> %{http_code} (%{time_total}s)\n" "https://${EDIT_HOST}/__diag" || echo "  [self-test $i] curl failed (exit $?)"
       sleep 3
     done
   else
-    echo "WARNING: cloudflared did not confirm a registered connection within 60s - dumping full log:"
-    cat /tmp/cfd.log 2>/dev/null
+    echo "WARNING: ssh tunnel did not confirm end-to-end connectivity within 60s - dumping log:"
+    cat /tmp/sshtun.log 2>/dev/null
   fi
 else
-  echo "no TUNNEL_TOKEN - local only"
+  echo "no SSH_TUNNEL_KEY - local only"
 fi
 
 IDLE_MIN="${IDLE_MINUTES:-10}"
@@ -82,6 +93,10 @@ MAX=$(( 340 * 60 )); start=$(date +%s)
 while true; do
   sleep 15
   now=$(date +%s)
+  if [ -n "${SSH_TUNNEL_KEY:-}" ] && ! kill -0 "$TUNNEL_PID" 2>/dev/null; then
+    echo "  [$(date -u +%H:%M:%S)] ssh tunnel died - reconnecting"
+    start_tunnel
+  fi
   if [ $(( now - last_diag )) -ge $DIAG_EVERY ]; then
     lc=$(curl -s -o /dev/null -m 5 -w "%{http_code}" "http://127.0.0.1:8080/__diag" 2>/dev/null || echo "FAIL")
     tc=$(curl -s -o /dev/null -m 8 -w "%{http_code}" "https://${EDIT_HOST}/__diag" 2>/dev/null || echo "FAIL")

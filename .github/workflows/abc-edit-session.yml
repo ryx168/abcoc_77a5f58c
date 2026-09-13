@@ -2,8 +2,9 @@ name: ABC checkout session
 
 # The XOOPS shop's checkout/cart/payment flow runs only for the length of a
 # customer's visit, restored from R2 into a runner (PHP 5.6 + MySQL), reached
-# through a Cloudflare tunnel. The public catalog is a separate static site on
-# Pages - this repo exists ONLY for the parts that can't be static: cart,
+# through an SSH reverse tunnel to our own VPS (nginx there proxies the public
+# hostname to the tunneled port). The public catalog is a separate static site
+# on Pages - this repo exists ONLY for the parts that can't be static: cart,
 # checkout, and the NewebPay payment callback.
 
 on:
@@ -38,7 +39,10 @@ jobs:
       STATE_BUCKET: ${{ secrets.STATE_BUCKET }}
       EDIT_HOST: ${{ secrets.EDIT_HOST }}
       DB_DATABASE: ${{ secrets.DB_DATABASE }}
-      TUNNEL_TOKEN: ${{ secrets.TUNNEL_TOKEN }}
+      SSH_TUNNEL_KEY: ${{ secrets.SSH_TUNNEL_KEY }}
+      SSH_TUNNEL_HOST: ${{ secrets.SSH_TUNNEL_HOST }}
+      SSH_TUNNEL_USER: ${{ secrets.SSH_TUNNEL_USER }}
+      SSH_TUNNEL_REMOTE_PORT: ${{ secrets.SSH_TUNNEL_REMOTE_PORT }}
       IDLE_MINUTES: ${{ inputs.idle_minutes }}
       CHECKOUT_HOLD_MINUTES: ${{ inputs.checkout_hold_minutes }}
     steps:
