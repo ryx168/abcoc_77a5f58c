@@ -25,7 +25,14 @@ curl -s -o /dev/null -w "  / -> %{http_code}\n" "http://127.0.0.1:8080/" || true
 if [ -n "${TUNNEL_TOKEN:-}" ]; then
   curl -fsSL -o /tmp/cloudflared "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64"
   chmod +x /tmp/cloudflared
-  /tmp/cloudflared tunnel --no-autoupdate --loglevel info run --token "$TUNNEL_TOKEN" >/tmp/cfd.log 2>&1 &
+  # --protocol http2: GH Actions runners' network handles the default QUIC/UDP
+  # transport strangely - the tunnel registers as a healthy connection (control
+  # plane over QUIC works) but request data never actually flows through it
+  # (every proxied request hangs with zero bytes, even though the same origin
+  # answers instantly on localhost and other tunnels on this same zone/account
+  # respond normally). Forcing TCP-based HTTP/2 avoids the UDP data plane
+  # entirely and is the standard fix for this exact "healthy but silent" symptom.
+  /tmp/cloudflared tunnel --no-autoupdate --protocol http2 --loglevel info run --token "$TUNNEL_TOKEN" >/tmp/cfd.log 2>&1 &
   echo "cloudflared launched (pid $!); verifying it actually registers a connection:"
   registered=0
   for i in $(seq 1 12); do
