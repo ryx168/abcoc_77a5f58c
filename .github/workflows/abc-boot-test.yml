@@ -30,6 +30,15 @@ jobs:
           tools: none
       - name: Boot XOOPS
         run: bash tools/abc-boot.sh
+      - name: PHP module diagnostic
+        run: |
+          php -v
+          echo "=== loaded extensions ==="
+          php -m
+          echo "=== mysql_connect exists? ==="
+          php -r "var_dump(function_exists('mysql_connect'));"
+          echo "=== direct mysql_connect test ==="
+          php -r "var_dump(@mysql_connect('127.0.0.1','root','root')); echo mysql_error();"
       - name: Start server + probe
         run: |
           cd webroot
