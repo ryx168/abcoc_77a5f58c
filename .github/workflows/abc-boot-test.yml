@@ -1,0 +1,50 @@
+name: ABC boot test
+on:
+  workflow_dispatch:
+
+jobs:
+  boot-test:
+    runs-on: ubuntu-22.04
+    services:
+      mysql:
+        image: mysql:5.7
+        env:
+          MYSQL_ROOT_PASSWORD: root
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping -uroot -proot" --health-interval=5s
+          --health-timeout=5s --health-retries=20
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      STATE_BUCKET: ${{ secrets.STATE_BUCKET }}
+      EDIT_HOST: ${{ secrets.EDIT_HOST }}
+      DB_DATABASE: ${{ secrets.DB_DATABASE }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '5.6'
+          extensions: mysql, gd, curl, zip, mbstring, mcrypt
+          tools: none
+      - name: Boot XOOPS
+        run: bash tools/abc-boot.sh
+      - name: Start server + probe
+        run: |
+          cd webroot
+          php -d error_reporting="E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_STRICT" -d display_errors=0 -S 127.0.0.1:8080 router.php >/tmp/php.log 2>&1 &
+          sleep 4
+          echo "=== homepage ==="
+          code=$(curl -s -o /tmp/home.html -w "%{http_code}" "http://127.0.0.1:8080/")
+          echo "HTTP $code"
+          echo "title: $(grep -oiE '<title>[^<]*' /tmp/home.html | head -1)"
+          echo "=== a real product page ==="
+          curl -s -o /tmp/prod.html -w "product HTTP %{http_code}\n" "http://127.0.0.1:8080/modules/shop/goods.php?id=37"
+          echo "title: $(grep -oiE '<title>[^<]*' /tmp/prod.html | head -1)"
+          echo "=== cart add (the real POST the site's own JS makes) ==="
+          curl -s -o /tmp/cart.html -w "cart-add HTTP %{http_code}\n" -X POST "http://127.0.0.1:8080/modules/shop/cart.php" --data "item_id=1&goods_id=37&op=add"
+          cat /tmp/cart.html | head -c 300
+          echo ""
+          echo "=== php error log (tail) ==="
+          tail -25 /tmp/php.log || true

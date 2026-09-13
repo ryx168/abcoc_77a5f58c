@@ -1,0 +1,67 @@
+#!/bin/bash
+# Restore the XOOPS shop app + DB from R2, write mainfile.php for the runner, and
+# fix the mysql_real_escape_string signature to match PHP 5.6's ext/mysql (single-
+# arg call site is a known XOOPS-on-old-PHP mismatch in a handful of builds).
+set -uo pipefail
+
+ROOT="${GITHUB_WORKSPACE:-$PWD}/webroot"
+rm -rf "$ROOT"; mkdir -p "$ROOT"; cd "$ROOT"
+CF="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${STATE_BUCKET}/objects"
+
+echo "::group::Restore state from R2"
+curl -sSf -H "Authorization: Bearer ${CF_API_TOKEN}" "$CF/app.tar.gz" -o app.tar.gz
+tar xzf app.tar.gz && rm -f app.tar.gz
+curl -sSf -H "Authorization: Bearer ${CF_API_TOKEN}" "$CF/db-latest.sql.gz" -o db.sql.gz
+echo "  app + db restored; top: $(ls | tr '\n' ' ')"
+echo "::endgroup::"
+
+echo "::group::Database"
+for i in $(seq 1 45); do
+  mysql -h127.0.0.1 -uroot -proot -e "SELECT 1" >/dev/null 2>&1 && break
+  echo "  waiting for mysql ($i)"; sleep 2
+done
+mysql -h127.0.0.1 -uroot -proot -e "CREATE DATABASE IF NOT EXISTS ${DB_DATABASE} CHARACTER SET utf8 COLLATE utf8_general_ci;"
+# strip the MariaDB-10.6+ sandbox-mode preamble line that older mysql clients choke on
+grep -v "^/\*M!999999" db.sql.gz > /dev/null 2>&1 || true
+zcat db.sql.gz | grep -v "^/\*M!999999" | mysql -h127.0.0.1 -uroot -proot "${DB_DATABASE}" && echo "  imported db"
+rm -f db.sql.gz
+echo "  orders: $(mysql -h127.0.0.1 -uroot -proot -N -e "SELECT COUNT(*) FROM ${DB_DATABASE}.xoops_shop_order" 2>/dev/null)"
+echo "::endgroup::"
+
+echo "::group::Write mainfile.php"
+EH="${EDIT_HOST}"
+python3 - "$ROOT" "$EH" "$DB_DATABASE" <<'PY'
+import io, re, sys
+root, eh, dbname = sys.argv[1], sys.argv[2], sys.argv[3]
+p = root + "/mainfile.php"
+h = io.open(p, encoding="utf-8", errors="replace").read()
+h = h.replace("/home/abc/public_html", root)
+h = re.sub(r"define\(\s*'XOOPS_URL',\s*'[^']*'\s*\);", "define( 'XOOPS_URL', 'https://%s' );" % eh, h)
+h = re.sub(r"define\(\s*'XOOPS_DB_HOST',\s*'[^']*'\s*\);", "define( 'XOOPS_DB_HOST', '127.0.0.1' );", h)
+h = re.sub(r"define\(\s*'XOOPS_DB_USER',\s*'[^']*'\s*\);", "define( 'XOOPS_DB_USER', 'root' );", h)
+h = re.sub(r"define\(\s*'XOOPS_DB_PASS',\s*'[^']*'\s*\);", "define( 'XOOPS_DB_PASS', 'root' );", h)
+h = re.sub(r"define\(\s*'XOOPS_DB_NAME',\s*'[^']*'\s*\);", "define( 'XOOPS_DB_NAME', '%s' );" % dbname, h)
+io.open(p, "w", encoding="utf-8", newline="\n").write(h)
+print("  mainfile.php rewritten for", eh)
+PY
+echo "::endgroup::"
+
+# Router for php -S: serve real static files directly; force HTTPS since the
+# tunnel terminates TLS (XOOPS_URL is https:// - without this, session/redirect
+# logic can loop the same way OpenCart's admin did).
+cat > router.php <<'PHP'
+<?php
+$_SERVER['HTTPS'] = 'on';
+$_SERVER['SERVER_PORT'] = 443;
+$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+$file = __DIR__ . $path;
+if ($path !== '/' && is_file($file) && substr($path, -4) !== '.php') { return false; }
+chdir(__DIR__);
+if ($path === '/' || $path === '') { $_SERVER['SCRIPT_NAME'] = '/index.php'; require __DIR__ . '/index.php'; return true; }
+$script = __DIR__ . $path;
+if (is_file($script) && substr($script, -4) === '.php') { $_SERVER['SCRIPT_NAME'] = $path; require $script; return true; }
+http_response_code(404);
+echo 'Not found';
+return true;
+PHP
+echo "BOOT_OK ROOT=$ROOT"
