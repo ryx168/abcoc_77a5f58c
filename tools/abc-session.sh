@@ -26,16 +26,15 @@ set -uo pipefail
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${GITHUB_WORKSPACE:-$PWD}/webroot"
 
-echo "TEMP DIAG: checking for php-fpm availability"
-which php-fpm php-fpm5.6 php-fpm56 2>&1 || true
-ls -la /usr/sbin/php-fpm* /usr/bin/php-fpm* 2>&1 || true
-php -v
-
-php -d error_reporting="E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_STRICT" \
-    -d display_errors=0 -S 127.0.0.1:8080 router.php >/tmp/php.log 2>&1 &
-sleep 3
-echo "php -S started; local probe:"
-curl -s -o /dev/null -w "  / -> %{http_code}\n" "http://127.0.0.1:8080/" || true
+/usr/sbin/php-fpm5.6 --fpm-config /tmp/php-fpm.conf --nodaemonize >/tmp/php-fpm-stdout.log 2>&1 &
+PHPFPM_PID=$!
+sleep 2
+echo "php-fpm started (pid $PHPFPM_PID); local probe:"
+if kill -0 "$PHPFPM_PID" 2>/dev/null && ss -tln 2>/dev/null | grep -q ":9000 "; then
+  echo "  listening on 127.0.0.1:9000"
+else
+  echo "  FAILED TO START - dumping log:"; cat /tmp/php-fpm-stdout.log /tmp/php-fpm.log 2>/dev/null
+fi
 
 SSH_KEY_FILE="/tmp/abc_ssh_tunnel_key"
 TUNNEL_PID=""
@@ -43,7 +42,7 @@ start_tunnel() {
   ssh -N -o StrictHostKeyChecking=no -o BatchMode=yes -o ServerAliveInterval=15 \
       -o ServerAliveCountMax=3 -o ExitOnForwardFailure=yes -o ConnectTimeout=10 \
       -i "$SSH_KEY_FILE" \
-      -R "127.0.0.1:${SSH_TUNNEL_REMOTE_PORT}:127.0.0.1:8080" \
+      -R "127.0.0.1:${SSH_TUNNEL_REMOTE_PORT}:127.0.0.1:9000" \
       "${SSH_TUNNEL_USER}@${SSH_TUNNEL_HOST}" >>/tmp/sshtun.log 2>&1 &
   TUNNEL_PID=$!
 }
@@ -92,7 +91,7 @@ hold_until=0
 last_persist=$(date +%s)
 PERSIST_EVERY=180   # seconds - a crash never loses more than ~3 minutes of orders
 last_diag=0
-DIAG_EVERY=30   # seconds - dual local-vs-tunnel probe, to tell a hung php -S apart from a tunnel data-plane issue
+DIAG_EVERY=30   # seconds - periodic php-fpm liveness + public round-trip check
 echo "watching for idle (${IDLE_MIN} min normal, extends to a ${HOLD_MIN} min floor once checkout starts)"
 MAX=$(( 340 * 60 )); start=$(date +%s)
 while true; do
@@ -103,9 +102,9 @@ while true; do
     start_tunnel
   fi
   if [ $(( now - last_diag )) -ge $DIAG_EVERY ]; then
-    lc=$(curl -s -o /dev/null -m 5 -w "%{http_code}" "http://127.0.0.1:8080/__diag" 2>/dev/null || echo "FAIL")
+    if kill -0 "$PHPFPM_PID" 2>/dev/null; then lc="alive"; else lc="DEAD"; fi
     tc=$(curl -s -o /dev/null -m 8 -w "%{http_code}" "https://${EDIT_HOST}/__diag" 2>/dev/null || echo "FAIL")
-    echo "  [diag $(date -u +%H:%M:%S)] local(127.0.0.1:8080)=$lc  tunnel(${EDIT_HOST})=$tc"
+    echo "  [diag $(date -u +%H:%M:%S)] php-fpm=$lc  tunnel(${EDIT_HOST})=$tc"
     last_diag=$now
   fi
   c=$(activity_count)

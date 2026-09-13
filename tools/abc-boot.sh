@@ -66,38 +66,44 @@ if [ $REWRITE_STATUS -ne 0 ]; then
 fi
 echo "::endgroup::"
 
-# Router for php -S: serve real static files directly; force HTTPS since the
-# tunnel terminates TLS (XOOPS_URL is https:// - without this, session/redirect
-# logic can loop the same way OpenCart's admin did).
-cat > router.php <<'PHP'
+# php-fpm replaces php -S: the built-in dev server is single-threaded and a
+# single slow/hanging request (an XOOPS error path, a fatal, anything) wedges
+# it forever, silently queuing every later request behind it - the real cause
+# of the "works for a burst then dies" pattern seen with both the Cloudflare
+# tunnel and the SSH tunnel. nginx on the VPS talks real FastCGI straight to
+# php-fpm here (root = this deterministic $GITHUB_WORKSPACE path, hardcoded
+# into the VPS vhost), the same proven SCRIPT_FILENAME/PATH_TRANSLATED setup
+# our own aaPanel deployment of this same app already uses successfully - no
+# custom router/shim needed, and no repeat of the earlier "No Module is
+# loaded" SAPI bug that a hand-rolled router caused.
+cat > __diag.php <<'PHP'
 <?php
-// XOOPS hits real .php files directly (modules/shop/goods.php?id=X, cart.php,
-// etc.) - no query-string routing scheme like OpenCart's. So the router only
-// needs to (a) force HTTPS since the tunnel terminates TLS, and (b) map "/" to
-// index.php. Every other existing file - .php included - is left to php -S's
-// OWN native execution, which sets up the full standard SAPI environment
-// (SCRIPT_FILENAME, PATH_TRANSLATED, etc.) that XOOPS' module/path detection
-// depends on. A custom require() here was setting only SCRIPT_NAME and left
-// $GLOBALS['xoopsModule'] never populated - "No Module is loaded".
-$_SERVER['HTTPS'] = 'on';
-$_SERVER['SERVER_PORT'] = 443;
-$path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-if ($path === '/__phplog') {
-    header('Content-Type: text/plain');
-    $f = '/tmp/php.log';
-    echo is_file($f) ? @file_get_contents($f) : 'no log file';
-    return true;
-}
-if ($path === '/__diag') {
-    header('Content-Type: text/plain');
-    echo 'ok ' . date('c');
-    return true;
-}
-if ($path === '/' || $path === '') {
-    chdir(__DIR__);
-    require __DIR__ . '/index.php';
-    return true;
-}
-return false;   // let php -S serve/execute the real file natively
+header('Content-Type: text/plain');
+echo 'ok ' . date('c');
 PHP
+cat > __phplog.php <<'PHP'
+<?php
+header('Content-Type: text/plain');
+$f = '/tmp/php.log';
+echo is_file($f) ? @file_get_contents($f) : 'no log file';
+PHP
+
+cat > /tmp/php-fpm.conf <<'FPM'
+[global]
+error_log = /tmp/php-fpm.log
+daemonize = no
+
+[www]
+listen = 127.0.0.1:9000
+pm = dynamic
+pm.max_children = 8
+pm.start_servers = 2
+pm.min_spare_servers = 1
+pm.max_spare_servers = 4
+catch_workers_output = yes
+access.log = /tmp/php.log
+access.format = "%m %r"
+php_admin_value[error_reporting] = E_ALL & ~E_DEPRECATED & ~E_NOTICE & ~E_STRICT
+php_admin_flag[display_errors] = off
+FPM
 echo "BOOT_OK ROOT=$ROOT"
