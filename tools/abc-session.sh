@@ -68,18 +68,26 @@ HOLD_MIN="${CHECKOUT_HOLD_MINUTES:-40}"
 idle_limit=$(( IDLE_MIN * 60 ))
 hold_limit=$(( HOLD_MIN * 60 ))
 
-activity_count() { grep -cE "GET|POST" /tmp/php.log 2>/dev/null || echo 0; }
+activity_count() { grep -E "GET|POST" /tmp/php.log 2>/dev/null | grep -vc "__diag\|__phplog"; }
 checkout_seen()  { grep -qE "checkout\.php|feedback\.php|response\.php" /tmp/php.log 2>/dev/null; }
 
 last_count=$(activity_count); last_active=$(date +%s)
 hold_until=0
 last_persist=$(date +%s)
 PERSIST_EVERY=180   # seconds - a crash never loses more than ~3 minutes of orders
+last_diag=0
+DIAG_EVERY=30   # seconds - dual local-vs-tunnel probe, to tell a hung php -S apart from a tunnel data-plane issue
 echo "watching for idle (${IDLE_MIN} min normal, extends to a ${HOLD_MIN} min floor once checkout starts)"
 MAX=$(( 340 * 60 )); start=$(date +%s)
 while true; do
   sleep 15
   now=$(date +%s)
+  if [ $(( now - last_diag )) -ge $DIAG_EVERY ]; then
+    lc=$(curl -s -o /dev/null -m 5 -w "%{http_code}" "http://127.0.0.1:8080/__diag" 2>/dev/null || echo "FAIL")
+    tc=$(curl -s -o /dev/null -m 8 -w "%{http_code}" "https://${EDIT_HOST}/__diag" 2>/dev/null || echo "FAIL")
+    echo "  [diag $(date -u +%H:%M:%S)] local(127.0.0.1:8080)=$lc  tunnel(${EDIT_HOST})=$tc"
+    last_diag=$now
+  fi
   c=$(activity_count)
   if [ "$c" != "$last_count" ]; then
     last_count=$c; last_active=$now

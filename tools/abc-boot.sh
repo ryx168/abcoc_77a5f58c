@@ -79,6 +79,11 @@ if ($path === '/__phplog') {
     echo is_file($f) ? @file_get_contents($f) : 'no log file';
     return true;
 }
+if ($path === '/__diag') {
+    header('Content-Type: text/plain');
+    echo 'ok ' . date('c');
+    return true;
+}
 if ($path === '/' || $path === '') {
     chdir(__DIR__);
     require __DIR__ . '/index.php';
