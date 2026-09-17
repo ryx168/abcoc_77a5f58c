@@ -1,0 +1,43 @@
+name: ABC sync from production
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-22.04
+    env:
+      CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+      STATE_BUCKET: ${{ secrets.STATE_BUCKET }}
+      PROD_PULL_KEY: ${{ secrets.PROD_PULL_KEY }}
+    steps:
+      - name: Pull from production over the restricted key
+        run: |
+          set -euo pipefail
+          umask 077
+          printf '%s\n' "$PROD_PULL_KEY" > /tmp/prod_pull_key
+          chmod 600 /tmp/prod_pull_key
+          ssh -o StrictHostKeyChecking=no -i /tmp/prod_pull_key root@209.188.7.230 > /tmp/pulled.tar
+          tar xf /tmp/pulled.tar -C /tmp
+          test -s /tmp/abc_backup_db.sql.gz
+          test -s /tmp/abc_backup_app.tar.gz
+          echo "db:  $(du -h /tmp/abc_backup_db.sql.gz  | cut -f1)"
+          echo "app: $(du -h /tmp/abc_backup_app.tar.gz | cut -f1)"
+          shred -u /tmp/prod_pull_key
+
+      - name: Push into R2 (same paths tools/abc-persist.sh uses)
+        run: |
+          set -euo pipefail
+          CF="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${STATE_BUCKET}/objects"
+          put() { curl -sSf -m 300 -X PUT -H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: $2" --data-binary @"$1" "$3" -o /dev/null; }
+          put /tmp/abc_backup_db.sql.gz application/gzip "$CF/db-latest.sql.gz"
+          put /tmp/abc_backup_db.sql.gz application/gzip "$CF/history/db-$(date +%Y%m%d-%H%M%S)-prodsync.sql.gz" || true
+          TAR_LISTING="$(tar tzf /tmp/abc_backup_app.tar.gz 2>/dev/null)" || TAR_LISTING=""
+          if [ -n "$TAR_LISTING" ] && grep -qx './mainfile.php' <<<"$TAR_LISTING"; then
+            put /tmp/abc_backup_app.tar.gz application/gzip "$CF/app.tar.gz"
+            echo "saved app.tar.gz + db-latest.sql.gz to R2"
+          else
+            echo "REFUSING to upload app.tar.gz - failed integrity check, leaving last-known-good R2 copy untouched"
+            exit 1
+          fi
