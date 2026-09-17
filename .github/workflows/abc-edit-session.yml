@@ -4,16 +4,17 @@ name: ABC checkout session
 # customer's visit, restored from R2 into a runner (PHP 5.6 + MySQL), reached
 # through an SSH reverse tunnel to our own VPS (nginx there proxies the public
 # hostname to the tunneled port). The public catalog is a separate static site
-# on Pages - this repo exists ONLY for the parts that can't be static: cart,
-# checkout, and the NewebPay payment callback.
+# on Pages - this repo exists ONLY for the parts that can't be static: cart
+# and checkout. Payment itself is manual/offline (the site takes the card
+# number directly and stores it for staff to charge later) - no gateway
+# redirect, no async callback, so there's nothing payment-specific for this
+# session to wait on; see tools/abc-session.sh.
 
 on:
   workflow_dispatch:
     inputs:
       idle_minutes:
         default: "10"
-      checkout_hold_minutes:
-        default: "40"
 
 concurrency:
   group: abc-checkout-session
@@ -44,7 +45,6 @@ jobs:
       SSH_TUNNEL_USER: ${{ secrets.SSH_TUNNEL_USER }}
       SSH_TUNNEL_REMOTE_PORT: ${{ secrets.SSH_TUNNEL_REMOTE_PORT }}
       IDLE_MINUTES: ${{ inputs.idle_minutes }}
-      CHECKOUT_HOLD_MINUTES: ${{ inputs.checkout_hold_minutes }}
     steps:
       - uses: actions/checkout@v4
       - uses: shivammathur/setup-php@v2

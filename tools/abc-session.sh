@@ -11,17 +11,17 @@
 # (no shell, no forward-outbound, permitlisten pinned to that one port) so a
 # leaked GH secret can only ever re-establish this exact reverse listener.
 #
-# Idle is measured by requests to checkout-relevant routes (cart/checkout/goods/
-# the NewebPay callback endpoints) - not admin/browsing noise, since this repo
-# only ever serves customers who were routed here by /__checkout-start.
+# Idle is measured by any request reaching us (cart/checkout/goods/admin) - this
+# repo only ever serves customers who were routed here by /__checkout-start.
 #
-# Payment safety: NewebPay redirects the customer OFF our server to pay, then
-# calls back asynchronously (feedback.php/response.php). No requests hit us
-# during that gap, so a pure idle-timer could kill the session while a customer
-# is off paying. Once a checkout.php request is seen, the idle deadline is
-# pushed out to a fixed minimum floor (CHECKOUT_HOLD_MINUTES) from that moment,
-# not just extended by the normal idle window - covering the external round trip
-# even if nothing else touches us until the callback arrives.
+# No payment-safety hold floor here: this shop takes the card number directly
+# in checkout.php and stores it for manual offline processing - there is no
+# NewebPay/gateway redirect and no async callback to wait for (confirmed
+# 2026-09-17: checkout.php has zero references to neweb/feedback.php/response.php,
+# and xoops_shop_payment has exactly one method, 'atm', used by all historical
+# orders). A checkout.php request is a normal request like any other - once it
+# returns, the order is already fully placed, so the plain idle timer below is
+# sufficient on its own.
 set -uo pipefail
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${GITHUB_WORKSPACE:-$PWD}/webroot"
@@ -79,20 +79,16 @@ else
 fi
 
 IDLE_MIN="${IDLE_MINUTES:-10}"
-HOLD_MIN="${CHECKOUT_HOLD_MINUTES:-40}"
 idle_limit=$(( IDLE_MIN * 60 ))
-hold_limit=$(( HOLD_MIN * 60 ))
 
 activity_count() { grep -E "GET|POST" /tmp/php.log 2>/dev/null | grep -vc "__diag\|__phplog"; }
-checkout_seen()  { grep -qE "checkout\.php|feedback\.php|response\.php" /tmp/php.log 2>/dev/null; }
 
 last_count=$(activity_count); last_active=$(date +%s)
-hold_until=0
 last_persist=$(date +%s)
 PERSIST_EVERY=180   # seconds - a crash never loses more than ~3 minutes of orders
 last_diag=0
 DIAG_EVERY=30   # seconds - periodic php-fpm liveness + public round-trip check
-echo "watching for idle (${IDLE_MIN} min normal, extends to a ${HOLD_MIN} min floor once checkout starts)"
+echo "watching for idle (${IDLE_MIN} min)"
 MAX=$(( 340 * 60 )); start=$(date +%s)
 while true; do
   sleep 15
@@ -110,19 +106,13 @@ while true; do
   c=$(activity_count)
   if [ "$c" != "$last_count" ]; then
     last_count=$c; last_active=$now
-    if checkout_seen; then
-      candidate=$(( now + hold_limit ))
-      [ $candidate -gt $hold_until ] && hold_until=$candidate
-    fi
   fi
   if [ $(( now - last_persist )) -ge $PERSIST_EVERY ]; then
     bash "$TOOLS_DIR/abc-persist.sh" || echo "  periodic persist failed (will retry next cycle)"
     last_persist=$now
   fi
   idle=$(( now - last_active ))
-  if [ $now -lt $hold_until ]; then
-    : # inside the payment-safety floor - never idle out yet, regardless of the plain timer
-  elif [ $idle -ge $idle_limit ]; then
+  if [ $idle -ge $idle_limit ]; then
     echo "idle ${idle}s >= ${idle_limit}s - stopping"; break
   fi
   [ $(( now - start )) -ge $MAX ] && { echo "max session time - stopping"; break; }
