@@ -1,0 +1,59 @@
+<!-- Stylesheet -->
+<link rel="stylesheet" type="text/css" media="screen" href="<{xoAppUrl xoops.css}>" />
+<link rel="stylesheet" type="text/css" media="all" href="<{xoImgUrl style.css}>" />
+<link rel="stylesheet" type="text/css" media="all" href="<{xoAppUrl Frameworks/rb/style.css}>" />
+<!-- jgrowl pulled out of the comment block below: showMessage() (used site-wide
+     for delete/update/checkout feedback) calls $.jGrowl(), which was silently
+     undefined on every single page since this file's own jgrowl include was
+     commented out - any code path that reached showMessage() after this point
+     threw an uncaught error there, with no visible message and, depending on
+     what ran after it in that same handler, sometimes no visible effect at all.
+     jQuery/jQuery UI/livequery/swfobject stay commented out below - those are
+     already loaded elsewhere per-page at the 1.4.2/1.7.2 versions the rest of
+     the site expects; loading the 1.12.4/1.11.4 refs here too would conflict. -->
+<script type="text/javascript" src="<{xoAppUrl Frameworks/jquery/jgrowl/jquery.jgrowl.js}>"></script>
+<link rel="stylesheet" type="text/css" media="all" title="Style sheet" href="<{xoAppUrl Frameworks/jquery/jgrowl/jquery.jgrowl.css}>" />
+<{*
+<!-- Javascript core -->
+<script src="https://code.jquery.com/jquery-1.12.4.min.js" integrity="sha256-ZosEbRLbNQzLpnKIkEdrPv7lOy9C27hHQ+Xp8a4MxAQ=" crossorigin="anonymous"></script>
+<script src="https://code.jquery.com/ui/1.11.4/jquery-ui.min.js" integrity="sha256-xNjb53/rY+WmG+4L6tTl9m6PpqknWZvRt0rO1SRnJzw=" crossorigin="anonymous"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/swfobject/2.2/swfobject.min.js"></script>
+<script type="text/javascript" src="<{xoAppUrl Frameworks/jquery/jquery.livequery.js}>"></script>
+<script type="text/javascript" src="<{xoAppUrl Frameworks/jquery/jquery.ifixpng.js}>"></script>
+*}>
+<!-- Customized header -->
+<{$xoops_module_header}>
+
+<script type="text/javascript">
+//<![CDATA[
+$(document).ready(function(){
+	
+	<{if $redirect_message}>showMessage('<{$redirect_message}>', <{$redirect_time}>);<{/if}>
+	
+	<!-- IE PNG Fix -->
+	// $.ifixpng('<{xoImgUrl images/pixel.gif}>');
+	// $('img[src$=.png]').ifixpng();
+	
+	// Expand Panel
+	$('.open_panel').click(function(){
+		$('div#panel').slideDown('slow');
+	
+	});	
+	
+	// Collapse Panel
+	$('.close_panel').click(function(){
+		$('div#panel').slideUp('slow');	
+	});	
+	
+	$('#joinus').click(function(){
+		alert('在ABC 美國維他命產品中心，您不需要先行註冊，在第一次購物時系統將請您同時填寫會員資料，並在完成購物流程後建立您的會員帳號。');
+	});	
+		
+});
+function showMessage(str, msec)
+{
+	if (!parseInt(msec)) msec = 2000;
+	if (str != '') $.jGrowl( str, { life:msec, position:'center', speed:'slow' } );
+}
+//]]>
+</script>

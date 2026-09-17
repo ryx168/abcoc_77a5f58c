@@ -1,0 +1,139 @@
+<{include file="$tpl_path/header.html"}>
+
+<div class="page_title">
+	<div class="left">
+		<h3>付款與配送方式</h3>
+	</div>
+	<div class="right">
+		<ul>
+			<li><a href="plugin.php?type=shipping">配送方式</a></li
+			><li><a href="plugin.php?type=payment">付款方式</a></li
+			><li class="last"><a href="discount.php">促銷優惠</a></li
+			>
+		</ul>
+	</div>
+	<div class="clear"></div>
+</div>
+
+<div class="sub_title">
+	<div class="left">
+		<img src="images/topic/creditcards.png" /> 
+		<span class="title"><{$xoops_pagetitle}></span>
+	</div>
+	<div class="clear"></div>
+</div>
+
+<form name="plugin" method="post" action="<{$smarty.server.PHP_SELF}>">
+<table class="rb_table rb_form" width="100%" cellspacing="0" cellpadding="0">
+	<tr>
+		<td width="30%" align="right">
+			<label for="name">模組名稱</label>
+		</td>
+		<td width="70%">
+			<input name="name" type="text" class="text" value="<{$install.name}>" style="width:385px;" />
+		</td>
+	</tr>
+	<tr>
+		<td align="right">
+			<label for="description">模組描述</label>
+		</td>
+		<td>
+			<textarea name="description" cols="60" rows="8" style="width:385px;"><{$install.description}></textarea>
+		</td>
+	</tr>
+	<tr>
+		<td align="right">
+			<label for="fare">手續費</label>
+		</td>
+		<td>
+			<{if $install.has_fare}>
+			<input name="fare" type="text" class="text" value="<{$install.fare|default:0}>" style="width:385px;" />
+			<{else}>
+			<{$install.fare_desc}>
+			<input name="fare" type="hidden" value="<{$install.fare|default:0}>" />
+			<{/if}>
+		</td>
+	</tr>
+	<{if $install.has_fare}>
+	<tr>
+		<td align="right">
+			<label for="fare_free">免手續費門檻</label>
+		</td>
+		<td>
+			<input name="fare_free" type="text" class="text" value="<{$install.fare_free|default:0}>" style="width:385px;" />
+		</td>
+	</tr>
+	<{/if}>
+	<{if $install.type == 'payment'}>
+	<tr>
+		<td align="right">
+			<label for="fare_percent">手續費百分比 (%)</label>
+		</td>
+		<td>
+			<input name="fare_percent" type="text" class="text" value="<{$install.fare_percent|default:0}>" style="width:385px;" />
+			依訂單商品總金額收取的百分比手續費，與上方固定手續費另外相加。
+		</td>
+	</tr>
+	<{/if}>
+	<{if $install.response}>
+	<tr>
+		<td align="right">&nbsp;</td>
+		<td>
+			若金流廠商有區分成功與失敗的資訊回傳網址，請一律使用以下網址作為設定值
+		</td>
+	</tr>
+	<tr>
+		<td align="right">
+			<label>回傳網址</label>
+		</td>
+		<td>
+			<{$install.response}>
+		</td>
+	</tr>
+	<{/if}>
+	<{if $smarty.get.type == 'shipping'}>
+	<tr>
+		<td align="right">
+			<label for="usepay">限制付款方式</label>
+		</td>
+		<td>
+			<div class="viewlist">
+				<ul>
+				<{foreach item=pay from=$payment name=payment}>
+					<li<{if $smarty.foreach.payment.last}> class="last"<{/if}>><input type="checkbox" name="usepay[]" id="usepay_<{$pay.dirname}>" value="<{$pay.dirname}>" <{if $pay.checked}> checked<{/if}> /><label for="usepay_<{$pay.dirname}>"><{$pay.name}></label></li>
+				<{/foreach}>
+				</ul>
+				<div class="clear"></div>
+			</div>
+			<div class="notice">未勾選任何付款方式時將視為允許使用所有付款方式</div>
+		</td>
+	</tr>
+	<{/if}>
+	<{foreach item=config from=$install.config}>
+	<tr>
+		<td align="right">
+			<label for="<{$config.name}>"><{$config.title}></label>
+		</td>
+		<td>
+			<{if $config.type == "text"}>
+			<input name="cfg_value[]" type="<{$config.type}>" class="<{$config.type}>" value="<{$config.value}>" style="width:385px;" />
+			<{elseif $config.type == "textarea"}>
+			<textarea name="cfg_value[]" cols="60" rows="8"><{$config.value}></textarea>
+			<{elseif $config.type == "select"}>
+			<select name="cfg_value[]" style="width:400px;"><{html_options options=$config.options selected=$config.value}></select>
+			<{/if}>
+			<input name="cfg_name[]" type="hidden" value="<{$config.name}>" />
+			<{$config.description}>
+		</td>
+	</tr>
+	<{/foreach}>
+</table>
+<p align="center">
+	<input type="hidden" name="op" value="<{$install.op}>" />
+	<input type="hidden" name="type" value="<{$install.type}>" />
+	<input type="hidden" name="dirname" value="<{$install.dirname}>" />
+	<input class="Butt" value="儲存" type="submit">
+</p>
+</form>
+
+<{include file="$tpl_path/footer.html"}>
