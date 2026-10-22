@@ -26,14 +26,17 @@ set -uo pipefail
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${GITHUB_WORKSPACE:-$PWD}/webroot"
 
-# Ensure all CLI extensions (mysql, gd, etc.) are available to php-fpm
-sudo cp -rn /etc/php/5.6/cli/conf.d/* /etc/php/5.6/fpm/conf.d/ 2>/dev/null || true
+# Ensure all PHP extensions (especially mysqlnd and mysql) are enabled for PHP-FPM
+sudo phpenmod -v 5.6 -s ALL mysql mysqli pdo_mysql gd curl mbstring mcrypt 2>/dev/null || true
+sudo cp -sf /etc/php/5.6/mods-available/* /etc/php/5.6/fpm/conf.d/ 2>/dev/null || true
+sudo cp -sf /etc/php/5.6/cli/conf.d/* /etc/php/5.6/fpm/conf.d/ 2>/dev/null || true
 
-/usr/sbin/php-fpm5.6 -c /etc/php/5.6/cli/php.ini --fpm-config /tmp/php-fpm.conf --nodaemonize >/tmp/php-fpm-stdout.log 2>&1 &
+export PHP_INI_SCAN_DIR=":/etc/php/5.6/cli/conf.d:/etc/php/5.6/fpm/conf.d"
+/usr/sbin/php-fpm5.6 --fpm-config /tmp/php-fpm.conf --nodaemonize >/tmp/php-fpm-stdout.log 2>&1 &
 PHPFPM_PID=$!
 sleep 2
 echo "php-fpm started (pid $PHPFPM_PID); local probe:"
-/usr/sbin/php-fpm5.6 -c /etc/php/5.6/cli/php.ini -m | grep -i mysql || true
+/usr/sbin/php-fpm5.6 -m | grep -i mysql || true
 if kill -0 "$PHPFPM_PID" 2>/dev/null && ss -tln 2>/dev/null | grep -q ":9000 "; then
   echo "  listening on 127.0.0.1:9000"
 else
