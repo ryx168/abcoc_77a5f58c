@@ -79,7 +79,7 @@ echo "::endgroup::"
 cat > __diag.php <<'PHP'
 <?php
 header('Content-Type: text/plain');
-echo 'ok ' . date('c');
+echo 'ok ' . date('c') . ' mysql:' . (extension_loaded('mysql') ? 'yes' : 'no');
 PHP
 cat > __phplog.php <<'PHP'
 <?php

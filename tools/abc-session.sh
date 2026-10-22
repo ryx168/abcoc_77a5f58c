@@ -26,10 +26,14 @@ set -uo pipefail
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${GITHUB_WORKSPACE:-$PWD}/webroot"
 
-/usr/sbin/php-fpm5.6 --fpm-config /tmp/php-fpm.conf --nodaemonize >/tmp/php-fpm-stdout.log 2>&1 &
+# Ensure all CLI extensions (mysql, gd, etc.) are available to php-fpm
+sudo cp -rn /etc/php/5.6/cli/conf.d/* /etc/php/5.6/fpm/conf.d/ 2>/dev/null || true
+
+/usr/sbin/php-fpm5.6 -c /etc/php/5.6/cli/php.ini --fpm-config /tmp/php-fpm.conf --nodaemonize >/tmp/php-fpm-stdout.log 2>&1 &
 PHPFPM_PID=$!
 sleep 2
 echo "php-fpm started (pid $PHPFPM_PID); local probe:"
+/usr/sbin/php-fpm5.6 -c /etc/php/5.6/cli/php.ini -m | grep -i mysql || true
 if kill -0 "$PHPFPM_PID" 2>/dev/null && ss -tln 2>/dev/null | grep -q ":9000 "; then
   echo "  listening on 127.0.0.1:9000"
 else
