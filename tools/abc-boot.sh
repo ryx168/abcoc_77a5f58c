@@ -43,11 +43,138 @@ rm -f db.sql.gz
 echo "  orders: $(mysql -h127.0.0.1 -uroot -proot -N -e "SELECT COUNT(*) FROM ${DB_DATABASE}.xoops_shop_order" 2>/dev/null)"
 echo "::endgroup::"
 
-echo "::group::Write mainfile.php"
+echo "::group::Write mainfile.php & mysql-shim"
 EH="${EDIT_HOST}"
 python3 - "$ROOT" "$EH" "$DB_DATABASE" <<'PY'
-import io, re, sys
+import io, os, re, sys
 root, eh, dbname = sys.argv[1], sys.argv[2], sys.argv[3]
+
+# 1. Write mysql-shim.php (mysqli-backed compatibility layer for PHP 5.6/7+)
+shim_code = '''<?php
+if (!function_exists('mysql_connect')) {
+    if (!defined('MYSQL_ASSOC')) define('MYSQL_ASSOC', MYSQLI_ASSOC);
+    if (!defined('MYSQL_NUM')) define('MYSQL_NUM', MYSQLI_NUM);
+    if (!defined('MYSQL_BOTH')) define('MYSQL_BOTH', MYSQLI_BOTH);
+
+    $GLOBALS['__mysql_last_conn'] = null;
+
+    function mysql_connect($server = null, $user = null, $password = null, $new_link = false, $client_flags = 0) {
+        if ($server === null) $server = '127.0.0.1';
+        $parts = explode(':', $server);
+        $host = $parts[0];
+        $port = isset($parts[1]) ? (int)$parts[1] : 3306;
+        $conn = mysqli_init();
+        if (!@mysqli_real_connect($conn, $host, $user, $password, null, $port)) {
+            return false;
+        }
+        mysqli_set_charset($conn, 'utf8');
+        $GLOBALS['__mysql_last_conn'] = $conn;
+        return $conn;
+    }
+
+    function mysql_pconnect($server = null, $user = null, $password = null, $client_flags = 0) {
+        return mysql_connect($server, $user, $password, false, $client_flags);
+    }
+
+    function mysql_select_db($database_name, $link_identifier = null) {
+        $conn = $link_identifier ?: $GLOBALS['__mysql_last_conn'];
+        return mysqli_select_db($conn, $database_name);
+    }
+
+    function mysql_query($query, $link_identifier = null) {
+        $conn = $link_identifier ?: $GLOBALS['__mysql_last_conn'];
+        return mysqli_query($conn, $query);
+    }
+
+    function mysql_fetch_array($result, $result_type = MYSQL_BOTH) {
+        if (!$result) return false;
+        return mysqli_fetch_array($result, $result_type);
+    }
+
+    function mysql_fetch_assoc($result) {
+        if (!$result) return false;
+        return mysqli_fetch_assoc($result);
+    }
+
+    function mysql_fetch_row($result) {
+        if (!$result) return false;
+        return mysqli_fetch_row($result);
+    }
+
+    function mysql_num_rows($result) {
+        if (!$result) return false;
+        return mysqli_num_rows($result);
+    }
+
+    function mysql_affected_rows($link_identifier = null) {
+        $conn = $link_identifier ?: $GLOBALS['__mysql_last_conn'];
+        return mysqli_affected_rows($conn);
+    }
+
+    function mysql_insert_id($link_identifier = null) {
+        $conn = $link_identifier ?: $GLOBALS['__mysql_last_conn'];
+        return mysqli_insert_id($conn);
+    }
+
+    function mysql_error($link_identifier = null) {
+        $conn = $link_identifier ?: $GLOBALS['__mysql_last_conn'];
+        return mysqli_error($conn);
+    }
+
+    function mysql_errno($link_identifier = null) {
+        $conn = $link_identifier ?: $GLOBALS['__mysql_last_conn'];
+        return mysqli_errno($conn);
+    }
+
+    function mysql_close($link_identifier = null) {
+        $conn = $link_identifier ?: $GLOBALS['__mysql_last_conn'];
+        return mysqli_close($conn);
+    }
+
+    function mysql_real_escape_string($unescaped_string, $link_identifier = null) {
+        $conn = $link_identifier ?: $GLOBALS['__mysql_last_conn'];
+        if ($conn) return mysqli_real_escape_string($conn, $unescaped_string);
+        return addslashes($unescaped_string);
+    }
+
+    function mysql_num_fields($result) {
+        if (!$result) return false;
+        return mysqli_num_fields($result);
+    }
+
+    function mysql_free_result($result) {
+        if (!$result) return false;
+        return mysqli_free_result($result);
+    }
+
+    function mysql_field_name($result, $field_offset) {
+        $finfo = mysqli_fetch_field_direct($result, $field_offset);
+        return $finfo ? $finfo->name : false;
+    }
+
+    function mysql_field_type($result, $field_offset) {
+        $finfo = mysqli_fetch_field_direct($result, $field_offset);
+        return $finfo ? $finfo->type : false;
+    }
+}
+'''
+with io.open(root + "/mysql-shim.php", "w", encoding="utf-8", newline="\n") as sf:
+    sf.write(shim_code)
+print("  mysql-shim.php created")
+
+# 2. Patch mysqldatabase.php
+db_php = root + "/class/database/mysqldatabase.php"
+if os.path.exists(db_php):
+    db_content = io.open(db_php, encoding="utf-8", errors="replace").read()
+    if "!extension_loaded( 'mysql' )" in db_content:
+        db_content = db_content.replace(
+            "if ( !extension_loaded( 'mysql' ) ) {",
+            "require_once dirname(dirname(dirname(__FILE__))) . '/mysql-shim.php'; if ( false ) {"
+        )
+        io.open(db_php, "w", encoding="utf-8", newline="\n").write(db_content)
+        print("  mysqldatabase.php patched with mysql-shim")
+
+# 3. Rewrite mainfile.php
 p = root + "/mainfile.php"
 h = io.open(p, encoding="utf-8", errors="replace").read()
 h = h.replace("/home/abc/public_html", root)
@@ -56,6 +183,11 @@ h = re.sub(r"define\(\s*'XOOPS_DB_HOST',\s*'[^']*'\s*\);", "define( 'XOOPS_DB_HO
 h = re.sub(r"define\(\s*'XOOPS_DB_USER',\s*'[^']*'\s*\);", "define( 'XOOPS_DB_USER', 'root' );", h)
 h = re.sub(r"define\(\s*'XOOPS_DB_PASS',\s*'[^']*'\s*\);", "define( 'XOOPS_DB_PASS', 'root' );", h)
 h = re.sub(r"define\(\s*'XOOPS_DB_NAME',\s*'[^']*'\s*\);", "define( 'XOOPS_DB_NAME', '%s' );" % dbname, h)
+
+# Prepend require mysql-shim to mainfile.php
+if "mysql-shim.php" not in h:
+    h = "<?php\nrequire_once dirname(__FILE__) . '/mysql-shim.php';\n" + h.lstrip("<?php").lstrip()
+
 io.open(p, "w", encoding="utf-8", newline="\n").write(h)
 print("  mainfile.php rewritten for", eh)
 PY
