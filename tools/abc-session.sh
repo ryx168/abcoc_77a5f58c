@@ -26,12 +26,31 @@ set -uo pipefail
 TOOLS_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "${GITHUB_WORKSPACE:-$PWD}/webroot"
 
-# Ensure all PHP extensions (especially mysqlnd and mysql) are enabled for PHP-FPM
-sudo phpenmod -v 5.6 -s ALL mysql mysqli pdo_mysql gd curl mbstring mcrypt 2>/dev/null || true
-sudo cp -sf /etc/php/5.6/mods-available/* /etc/php/5.6/fpm/conf.d/ 2>/dev/null || true
-sudo cp -sf /etc/php/5.6/cli/conf.d/* /etc/php/5.6/fpm/conf.d/ 2>/dev/null || true
+# Ensure all PHP extensions (especially mysqlnd and mysql) are loaded in PHP-FPM
+EXT_DIR=$(php -r 'echo ini_get("extension_dir");')
+echo "PHP CLI extension_dir: $EXT_DIR"
+echo "Available mysql extensions in $EXT_DIR:"
+ls -la "$EXT_DIR"/*mysql* 2>/dev/null || true
 
-export PHP_INI_SCAN_DIR=":/etc/php/5.6/cli/conf.d:/etc/php/5.6/fpm/conf.d"
+# Explicitly ensure mysqlnd and mysql are in FPM conf.d and FPM php.ini
+sudo mkdir -p /etc/php/5.6/fpm/conf.d
+sudo cp -rf /etc/php/5.6/cli/conf.d/* /etc/php/5.6/fpm/conf.d/ 2>/dev/null || true
+
+if [ -f "$EXT_DIR/mysqlnd.so" ]; then
+  echo "extension=$EXT_DIR/mysqlnd.so" | sudo tee /etc/php/5.6/fpm/conf.d/10-mysqlnd.ini
+fi
+if [ -f "$EXT_DIR/mysql.so" ]; then
+  echo "extension=$EXT_DIR/mysql.so" | sudo tee /etc/php/5.6/fpm/conf.d/20-mysql.ini
+fi
+if [ -f "$EXT_DIR/mysqli.so" ]; then
+  echo "extension=$EXT_DIR/mysqli.so" | sudo tee /etc/php/5.6/fpm/conf.d/20-mysqli.ini
+fi
+
+if [ -f /etc/php/5.6/fpm/php.ini ]; then
+  echo "extension=mysqlnd.so" | sudo tee -a /etc/php/5.6/fpm/php.ini
+  echo "extension=mysql.so" | sudo tee -a /etc/php/5.6/fpm/php.ini
+fi
+
 /usr/sbin/php-fpm5.6 --fpm-config /tmp/php-fpm.conf --nodaemonize >/tmp/php-fpm-stdout.log 2>&1 &
 PHPFPM_PID=$!
 sleep 2

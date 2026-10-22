@@ -79,7 +79,18 @@ echo "::endgroup::"
 cat > __diag.php <<'PHP'
 <?php
 header('Content-Type: text/plain');
-echo 'ok ' . date('c') . ' mysql:' . (extension_loaded('mysql') ? 'yes' : 'no');
+echo "=== PHP DIAG ===\n";
+echo "PHP_VERSION: " . PHP_VERSION . "\n";
+echo "Loaded ini: " . php_ini_loaded_file() . "\n";
+echo "Scanned ini: " . php_ini_scanned_files() . "\n";
+echo "EXT_DIR: " . ini_get('extension_dir') . "\n";
+echo "MYSQL_LOADED: " . (extension_loaded('mysql') ? 'YES' : 'NO') . "\n";
+echo "MYSQLI_LOADED: " . (extension_loaded('mysqli') ? 'YES' : 'NO') . "\n";
+echo "EXTENSIONS: " . implode(', ', get_loaded_extensions()) . "\n";
+echo "=== EXTENSION SO FILES ===\n";
+foreach (glob(ini_get('extension_dir') . '/*') as $f) {
+    if (strpos($f, 'mysql') !== false) echo "  $f\n";
+}
 PHP
 cat > __phplog.php <<'PHP'
 <?php
