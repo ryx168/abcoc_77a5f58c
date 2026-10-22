@@ -18,7 +18,7 @@ on:
 
 concurrency:
   group: abc-checkout-session
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   session:
