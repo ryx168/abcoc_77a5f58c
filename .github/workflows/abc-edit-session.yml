@@ -53,9 +53,16 @@ jobs:
           extensions: mysql, gd, curl, zip, mbstring, mcrypt, session, xml, simplexml, iconv, zlib, ctype, dom, gettext, json
           tools: none
       - name: Boot
+        # id so the final persist can tell whether the restore actually completed.
+        id: boot
         run: bash tools/abc-boot.sh
       - name: Session
         run: bash tools/abc-session.sh
       - name: Final persist
-        if: always()
+        # always() so a cancelled or timed-out session still persists its orders -
+        # but ONLY once the restore has completed. Without the second clause a
+        # failed boot still ran this against a shop that never loaded, and could
+        # have uploaded an empty database over the saved orders. outcome (not
+        # conclusion) so a restore cancelled part-way also skips the persist.
+        if: ${{ always() && steps.boot.outcome == 'success' }}
         run: bash tools/abc-persist.sh
