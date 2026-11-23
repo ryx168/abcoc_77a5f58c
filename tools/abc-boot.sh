@@ -17,7 +17,8 @@ if [ $TAR_STATUS -ne 0 ] || [ ! -f mainfile.php ]; then
   exit 1
 fi
 rm -f app.tar.gz
-curl -sSf -H "Authorization: Bearer ${CF_API_TOKEN}" "$CF/db-latest.sql.gz" -o db.sql.gz
+curl -sSf -H "Authorization: Bearer ${CF_API_TOKEN}" "$CF/db-latest.sql.gz" -o db.sql.gz \
+  || { echo "  FATAL: could not download db-latest.sql.gz - refusing to boot the shop with no database"; exit 1; }
 echo "  app + db restored; top: $(ls | tr '\n' ' ')"
 # abc-persist.sh excludes these as *contents* (they're regenerated at runtime and
 # stale absolute-path caches were the whole reason they get wiped), but tar's
@@ -38,7 +39,17 @@ done
 mysql -h127.0.0.1 -uroot -proot -e "CREATE DATABASE IF NOT EXISTS ${DB_DATABASE} CHARACTER SET utf8 COLLATE utf8_general_ci;"
 # strip the MariaDB-10.6+ sandbox-mode preamble line that older mysql clients choke on
 grep -v "^/\*M!999999" db.sql.gz > /dev/null 2>&1 || true
-zcat db.sql.gz | grep -v "^/\*M!999999" | mysql -h127.0.0.1 -uroot -proot "${DB_DATABASE}" && echo "  imported db"
+# No `set -e` in this script, so the import must fail the step by itself. Before
+# this a failed import printed nothing and the shop booted on an empty or
+# half-loaded database, which the persist script would then have saved.
+zcat db.sql.gz | grep -v "^/\*M!999999" | mysql -h127.0.0.1 -uroot -proot "${DB_DATABASE}" && echo "  imported db" \
+  || { echo "  FATAL: database import failed - refusing to run the shop on a partial database"; exit 1; }
+n_tables=$(mysql -h127.0.0.1 -uroot -proot -N -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema='${DB_DATABASE}'" 2>/dev/null || echo 0)
+if [ "${n_tables:-0}" -lt 30 ]; then
+  echo "  FATAL: the restored database has only ${n_tables:-0} tables (expected about 76) - refusing to run the shop on an empty or partial database"
+  exit 1
+fi
+echo "  database tables: $n_tables"
 rm -f db.sql.gz
 echo "  orders: $(mysql -h127.0.0.1 -uroot -proot -N -e "SELECT COUNT(*) FROM ${DB_DATABASE}.xoops_shop_order" 2>/dev/null)"
 echo "::endgroup::"
