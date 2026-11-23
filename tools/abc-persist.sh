@@ -4,11 +4,28 @@
 # minutes of orders) and once more at session end. Never touches the export/
 # static site - that is a separate, independently-maintained catalog.
 set -uo pipefail
-cd "${GITHUB_WORKSPACE:-$PWD}/webroot"
+cd "${GITHUB_WORKSPACE:-$PWD}/webroot" \
+  || { echo "  [persist] FATAL: webroot is missing - the restore never happened; NOT saving"; exit 1; }
 CF="https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/r2/buckets/${STATE_BUCKET}/objects"
 put() { curl -sSf -m 300 -X PUT -H "Authorization: Bearer ${CF_API_TOKEN}" -H "Content-Type: $2" --data-binary @"$1" "$3" -o /dev/null; }
 
-mysqldump -h127.0.0.1 -uroot -proot "${DB_DATABASE}" 2>/dev/null | gzip > /tmp/db.sql.gz
+# Dump to a FILE and check it before anything is uploaded. The old form
+# (`mysqldump 2>/dev/null | gzip`) hid every error and, with pipefail but no -e,
+# passed on a tiny valid .gz even when MySQL was dead or the database empty,
+# which the next line uploaded over db-latest.sql.gz. This database holds the
+# live orders, so refuse unless it is demonstrably a whole dump: mysqldump
+# succeeded, it has >= 30 tables (the real one has 76), and it has the
+# orders table. A refusal leaves the last-known-good R2 copy untouched.
+if ! mysqldump -h127.0.0.1 -uroot -proot "${DB_DATABASE}" > /tmp/db.sql 2> /tmp/dump.err; then
+  echo "  [persist] FATAL: mysqldump failed - NOT saving over db-latest.sql.gz: $(head -c 300 /tmp/dump.err)"
+  exit 1
+fi
+n_tables=$(grep -c '^CREATE TABLE ' /tmp/db.sql || true)
+if [ "${n_tables:-0}" -lt 30 ] || ! grep -q '^CREATE TABLE `xoops_shop_order`' /tmp/db.sql; then
+  echo "  [persist] REFUSING to save: the dump has ${n_tables:-0} tables or no orders table ($(wc -c < /tmp/db.sql) bytes) - leaving the last-known-good R2 copy"
+  exit 1
+fi
+gzip -c /tmp/db.sql > /tmp/db.sql.gz
 put /tmp/db.sql.gz application/gzip "$CF/db-latest.sql.gz" && echo "  [persist $(date -u +%H:%M:%S)] saved db-latest.sql.gz ($(du -h /tmp/db.sql.gz|cut -f1))"
 put /tmp/db.sql.gz application/gzip "$CF/history/db-$(date +%Y%m%d-%H%M%S).sql.gz" || true
 
